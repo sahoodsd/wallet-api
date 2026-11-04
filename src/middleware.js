@@ -1,4 +1,12 @@
-const { AppError } = require('./errors');
+const { AppError, unauthorized } = require('./errors');
+
+/** Puts the verified user on req.user. The user id only ever comes from the token. */
+const requireAuth = (auth) => (req, _res, next) => {
+  const [scheme, token] = (req.headers.authorization || '').split(' ');
+  if (scheme !== 'Bearer' || !token) return next(unauthorized());
+  req.user = auth.verify(token); // throws 401 if invalid; Express passes it to the error handler
+  next();
+};
 
 const notFoundHandler = (_req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
@@ -16,4 +24,4 @@ const errorHandler = (err, _req, res, _next) => {
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' } });
 };
 
-module.exports = { notFoundHandler, errorHandler };
+module.exports = { requireAuth, notFoundHandler, errorHandler };
