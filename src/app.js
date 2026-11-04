@@ -2,12 +2,14 @@ const express = require('express');
 const { openDatabase } = require('./db/database');
 const { createRepository } = require('./db/repository');
 const { createAuthService } = require('./services/auth.service');
+const { createWalletService } = require('./services/wallet.service');
 const { requireAuth, notFoundHandler, errorHandler } = require('./middleware');
-const { registerSchema, loginSchema, parse } = require('./validation');
+const { registerSchema, loginSchema, parse, parseAmount } = require('./validation');
 
 function createApp({ db = openDatabase(), jwtSecret = process.env.JWT_SECRET || 'dev-secret' } = {}) {
   const repo = createRepository(db);
   const auth = createAuthService(repo, { jwtSecret });
+  const wallet = createWalletService(repo);
 
   const app = express();
   app.use(express.json());
@@ -21,6 +23,13 @@ function createApp({ db = openDatabase(), jwtSecret = process.env.JWT_SECRET || 
     res.json(await auth.login(parse(loginSchema, req.body)));
   });
   app.get('/auth/me', requireAuth(auth), (req, res) => res.json({ user: req.user }));
+
+  const w = express.Router();
+  w.use(requireAuth(auth));
+  w.get('/', (req, res) => res.json(wallet.getBalance(req.user.id)));
+  w.post('/deposit', (req, res) => res.json(wallet.deposit(req.user.id, parseAmount(req.body?.amount))));
+  w.post('/withdraw', (req, res) => res.json(wallet.withdraw(req.user.id, parseAmount(req.body?.amount))));
+  app.use('/wallet', w);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
