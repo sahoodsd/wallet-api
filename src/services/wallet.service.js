@@ -38,11 +38,23 @@ function createWalletService(repo) {
     /**
      * Moves money between two wallets in one SQLite transaction: if anything throws,
      * the debit is rolled back too, so money is never lost or created halfway.
+     *
+     * With an idempotency key, a retry of a successful transfer returns the saved
+     * response instead of moving the money again. The key check, the transfer and
+     * saving the key all commit together, so two retries can't both get through.
      */
-    transfer(from, toEmail, amount) {
+    transfer(from, toEmail, amount, idempotencyKey) {
       if (typeof toEmail !== 'string' || !toEmail.trim()) throw badRequest('toEmail is required');
+      if (idempotencyKey !== undefined && (!idempotencyKey.trim() || idempotencyKey.length > 255)) {
+        throw badRequest('Idempotency-Key must be 1-255 characters');
+      }
 
       return repo.transaction(() => {
+        if (idempotencyKey) {
+          const saved = repo.getIdempotent(from.id, idempotencyKey);
+          if (saved) return { ...JSON.parse(saved), replayed: true };
+        }
+
         const recipient = repo.findUserByEmail(toEmail.trim().toLowerCase());
         if (!recipient) throw notFound('Recipient not found');
         if (recipient.id === from.id) throw badRequest('Cannot transfer to yourself');
@@ -59,7 +71,9 @@ function createWalletService(repo) {
           balanceAfter: repo.getBalance(recipient.id), counterparty: from.email,
         });
 
-        return { ...balanceView(from.id), transaction: txView(out) };
+        const result = { ...balanceView(from.id), transaction: txView(out) };
+        if (idempotencyKey) repo.saveIdempotent(from.id, idempotencyKey, result);
+        return { ...result, replayed: false };
       });
     },
 

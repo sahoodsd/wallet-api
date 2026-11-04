@@ -20,6 +20,9 @@ function createRepository(db) {
     // Uses the (user_id, seq DESC) index; seq gives a stable order within the same millisecond.
     txPage: db.prepare('SELECT * FROM transactions WHERE user_id = ? ORDER BY seq DESC LIMIT ? OFFSET ?'),
     txCount: db.prepare('SELECT COUNT(*) AS total FROM transactions WHERE user_id = ?'),
+
+    getIdem: db.prepare('SELECT response FROM idempotency_keys WHERE user_id = ? AND key = ?'),
+    saveIdem: db.prepare('INSERT INTO idempotency_keys (user_id, key, response, created_at) VALUES (?, ?, ?, ?)'),
   };
 
   return {
@@ -51,6 +54,10 @@ function createRepository(db) {
     listTransactions(userId, limit, offset) {
       return { rows: stmt.txPage.all(userId, limit, offset), total: stmt.txCount.get(userId).total };
     },
+
+    getIdempotent: (userId, key) => stmt.getIdem.get(userId, key)?.response,
+    saveIdempotent: (userId, key, response) =>
+      stmt.saveIdem.run(userId, key, JSON.stringify(response), new Date().toISOString()),
   };
 }
 
