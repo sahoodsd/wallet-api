@@ -1,4 +1,4 @@
-const { unprocessable } = require('../errors');
+const { badRequest, notFound, unprocessable } = require('../errors');
 const { toMajor } = require('../validation');
 
 const CURRENCY = 'AED';
@@ -33,6 +33,39 @@ function createWalletService(repo) {
         const tx = repo.addTransaction({ userId, type: 'WITHDRAWAL', amount, balanceAfter: repo.getBalance(userId) });
         return { ...balanceView(userId), transaction: txView(tx) };
       });
+    },
+
+    /**
+     * Moves money between two wallets in one SQLite transaction: if anything throws,
+     * the debit is rolled back too, so money is never lost or created halfway.
+     */
+    transfer(from, toEmail, amount) {
+      if (typeof toEmail !== 'string' || !toEmail.trim()) throw badRequest('toEmail is required');
+
+      return repo.transaction(() => {
+        const recipient = repo.findUserByEmail(toEmail.trim().toLowerCase());
+        if (!recipient) throw notFound('Recipient not found');
+        if (recipient.id === from.id) throw badRequest('Cannot transfer to yourself');
+
+        if (!repo.debit(from.id, amount)) throw unprocessable('INSUFFICIENT_FUNDS', 'Balance is too low');
+        repo.credit(recipient.id, amount);
+
+        const out = repo.addTransaction({
+          userId: from.id, type: 'TRANSFER_OUT', amount,
+          balanceAfter: repo.getBalance(from.id), counterparty: recipient.email,
+        });
+        repo.addTransaction({
+          userId: recipient.id, type: 'TRANSFER_IN', amount,
+          balanceAfter: repo.getBalance(recipient.id), counterparty: from.email,
+        });
+
+        return { ...balanceView(from.id), transaction: txView(out) };
+      });
+    },
+
+    listTransactions(userId, { page, limit }) {
+      const { rows, total } = repo.listTransactions(userId, limit, (page - 1) * limit);
+      return { data: rows.map(txView), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
     },
   };
 }

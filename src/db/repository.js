@@ -17,6 +17,9 @@ function createRepository(db) {
     insertTx: db.prepare(`INSERT INTO transactions (id, seq, user_id, type, amount, balance_after, counterparty, created_at)
       VALUES (@id, @seq, @user_id, @type, @amount, @balance_after, @counterparty, @created_at)`),
     txById: db.prepare('SELECT * FROM transactions WHERE id = ?'),
+    // Uses the (user_id, seq DESC) index; seq gives a stable order within the same millisecond.
+    txPage: db.prepare('SELECT * FROM transactions WHERE user_id = ? ORDER BY seq DESC LIMIT ? OFFSET ?'),
+    txCount: db.prepare('SELECT COUNT(*) AS total FROM transactions WHERE user_id = ?'),
   };
 
   return {
@@ -44,6 +47,9 @@ function createRepository(db) {
       };
       stmt.insertTx.run(row);
       return stmt.txById.get(row.id);
+    },
+    listTransactions(userId, limit, offset) {
+      return { rows: stmt.txPage.all(userId, limit, offset), total: stmt.txCount.get(userId).total };
     },
   };
 }
